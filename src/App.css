@@ -36,3 +36,76 @@
     transform: rotate(360deg);
   }
 }
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+}
+
+.box {
+  border: 1px solid #ddd;
+  padding: 20px;
+  border-radius: 10px;
+  background-color: #f9f9f9;
+  margin-bottom: 20px;
+}
+
+button {
+  padding: 8px 15px;
+  margin: 5px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+button.upload {
+  background-color: #4CAF50;
+  color: white;
+}
+
+button.download {
+  background-color: #2196F3;
+  color: white;
+}
+
+button.signout {
+  background-color: #f44336;
+  color: white;
+}
+
+ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+li {
+  margin-bottom: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap; /* ✅ يسمح للملف والزر أن يلتفوا */
+  word-break: break-word; /* ✅ يجعل النص الطويل يلف على السطر التالي */
+}
+.file-name {
+  display: block;
+  max-width: 100%; /* ✅ يأخذ كل عرض الصندوق */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: break-all; /* ✅ لو النص بدون مسافات */
+}
+li small {
+  color: #777;
+  font-size: 12px;
+}
+body {
+  background-color: #282c34;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
