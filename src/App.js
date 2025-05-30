@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { FaUpload, FaSignOutAlt, FaGoogleDrive, FaDownload, FaTrash, FaSpinner, FaCloudUploadAlt, FaEye } from "react-icons/fa";
 import './App.css';
-// 🔐 دالة تشفير النص (اسم الملف)
+
+
 async function encryptText(text, password) {
   const enc = new TextEncoder();
   const passwordKey = await window.crypto.subtle.importKey(
@@ -46,7 +48,7 @@ async function encryptText(text, password) {
   return btoa(String.fromCharCode(...combinedBuffer));
 }
 
-// 🔐 دالة تشفير الملف (المحتوى)
+
 async function encryptFileWithPassword(file, password) {
   const enc = new TextEncoder();
   const passwordKey = await window.crypto.subtle.importKey(
@@ -94,7 +96,6 @@ async function encryptFileWithPassword(file, password) {
   return new Blob([combinedBuffer], { type: "application/octet-stream" });
 }
 
-// 🔓 دالة فك تشفير النص (اسم الملف)
 async function decryptText(encryptedBase64, password) {
   const data = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
 
@@ -136,7 +137,6 @@ async function decryptText(encryptedBase64, password) {
   return new TextDecoder().decode(decryptedContent);
 }
 
-// 🔓 دالة فك تشفير الملف (المحتوى)
 async function decryptFile(encryptedBlob, password) {
   const arrayBuffer = await encryptedBlob.arrayBuffer();
   const data = new Uint8Array(arrayBuffer);
@@ -180,42 +180,77 @@ async function decryptFile(encryptedBlob, password) {
 }
 
 function App() {
-  const CLIENT_ID = "688221994212-9rt2ebg6gpbihvp883u0u2mr1fkhiu9v.apps.googleusercontent.com";
+  const CLIENT_ID = "1008435627765-144r736ibuofi33smv1o8pj40f38j407.apps.googleusercontent.com";
   const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
-  const [token, setToken] = useState(null);
+  const [token, setToken] = useState(() => localStorage.getItem('token') || null);
   const [tokenClient, setTokenClient] = useState(null);
-  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [isSignedIn, setIsSignedIn] = useState(() => localStorage.getItem('isSignedIn') === 'true');
   const [fileList, setFileList] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState(null);
+  const [viewingFile, setViewingFile] = useState(null);
+
+  // Move fetchFileList above useEffect and wrap in useCallback
+  const fetchFileList = useCallback(async () => {
+    try {
+      const res = await fetch(
+        "https://www.googleapis.com/drive/v3/files?fields=files(id,name,size,createdTime)",
+        {
+          headers: new Headers({ Authorization: "Bearer " + token }),
+        }
+      );
+      const data = await res.json();
+      console.log("Files:", data.files);
+      setFileList(data.files || []);
+    } catch (error) {
+      console.error("Failed to fetch files:", error);
+      setFileList([]);
+    }
+  }, [token]);
 
   useEffect(() => {
-    /* global google */
-    if (window.google) {
+    if (window.google && !isSignedIn) {
+      const signInDiv = document.getElementById("googleSignInDiv");
+      if (signInDiv) signInDiv.innerHTML = "";
       window.google.accounts.id.initialize({
         client_id: CLIENT_ID,
         callback: handleCredentialResponse,
       });
-
       window.google.accounts.id.renderButton(
         document.getElementById("googleSignInDiv"),
         { theme: "outline", size: "large" }
       );
-
+    }
+    if (window.google && isSignedIn && !tokenClient) {
       const client = window.google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
         callback: (tokenResponse) => {
           console.log("Access Token:", tokenResponse.access_token);
           setToken(tokenResponse.access_token);
+          localStorage.setItem('token', tokenResponse.access_token);
         },
       });
       setTokenClient(client);
     }
-  }, []);
+  }, [isSignedIn, tokenClient]);
+
+  // Add automatic refresh effect
+  useEffect(() => {
+    if (token) {
+      fetchFileList();
+      // Refresh every 2 seconds
+      const interval = setInterval(fetchFileList, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [token, fetchFileList]);
 
   const handleCredentialResponse = (response) => {
     console.log("Signed in! JWT:", response.credential);
     setIsSignedIn(true);
+    localStorage.setItem('isSignedIn', 'true');
   };
 
   const handleRequestAccessToken = () => {
@@ -229,12 +264,19 @@ function App() {
   const handleSignOut = () => {
     setToken(null);
     setIsSignedIn(false);
+    localStorage.removeItem('token');
+    localStorage.removeItem('isSignedIn');
     window.google.accounts.id.disableAutoSelect();
   };
 
   const handleFileUpload = async (event) => {
+    setIsLoading(true);
+    setError(null);
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file) {
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const password = prompt("🔑 Enter a password for encryption:");
@@ -264,28 +306,33 @@ function App() {
       const data = await res.json();
       console.log("Encrypted file uploaded, ID:", data.id);
       alert(`✅ Encrypted file uploaded! ID: ${data.id}`);
+      fetchFileList();
     } catch (error) {
       console.error("Encryption or upload failed:", error);
-      alert("❌ Failed to encrypt or upload the file.");
+      setError("Failed to encrypt or upload the file.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const fetchFileList = async () => {
-    try {
-      const res = await fetch(
-        "https://www.googleapis.com/drive/v3/files?fields=files(id,name,size,createdTime)",
-        {
-          headers: new Headers({ Authorization: "Bearer " + token }),
-        }
-      );
-      const data = await res.json();
-      console.log("Files:", data.files);
-      setFileList(data.files);
-    } catch (error) {
-      console.error("Failed to fetch files:", error);
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const event = { target: { files: [file] } };
+      handleFileUpload(event);
     }
   };
-  
 
   const handleDownloadAndDecrypt = async (file) => {
     const password = prompt("🔑 Enter password to decrypt:");
@@ -320,60 +367,200 @@ function App() {
     }
   };
 
+  const handleDeleteFile = async (fileId) => {
+    if (!window.confirm("Are you sure you want to delete this file?")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}`,
+        {
+          method: "DELETE",
+          headers: new Headers({ Authorization: "Bearer " + token }),
+        }
+      );
+
+      if (res.ok) {
+        alert("✅ File deleted successfully!");
+        // Refresh file list after deletion
+        fetchFileList();
+      } else {
+        throw new Error("Failed to delete file");
+      }
+    } catch (error) {
+      console.error("Delete failed:", error);
+      alert("❌ Failed to delete the file.");
+    }
+  };
+
+  const handleViewFile = async (file) => {
+    const password = prompt("🔑 Enter password to view file details:");
+    if (!password) return;
+
+    try {
+      const encryptedFileNameBase64 = file.name.replace(".enc", "");
+      const originalFileName = await decryptText(encryptedFileNameBase64, password);
+      
+      // Get file type from original filename
+      const fileType = originalFileName.split('.').pop().toUpperCase();
+      
+      setViewingFile({
+        name: originalFileName,
+        type: fileType,
+        size: file.size ? `${(file.size / 1024).toFixed(2)} KB` : "Unknown",
+        createdTime: file.createdTime ? new Date(file.createdTime).toLocaleString() : "Unknown"
+      });
+    } catch (error) {
+      console.error("Failed to decrypt filename:", error);
+      alert("❌ Failed to view file details. Maybe wrong password?");
+    }
+  };
+
+  const closeViewModal = () => {
+    setViewingFile(null);
+  };
+
   return (
-    <div  className="container">
-    <div className="box">
-  <h1>🚀 Encrypted Cloud Storage</h1>
-
-  {!isSignedIn && <div id="googleSignInDiv"></div>}
-
-  {isSignedIn && !token && (
-    <>
-      <p>✅ Signed in! Now authorize Google Drive access:</p>
-      <button className="upload" onClick={handleRequestAccessToken}>Authorize Google Drive Access</button>
-      <button className="signout" onClick={handleSignOut}>Sign Out</button>
-    </>
-  )}
-
-  {token && (
-    <>
-      <p>✅ You are signed in and authorized. You can now upload files.</p>
-      <input type="file" onChange={handleFileUpload} />
-      <br /><br />
-      <button className="upload" onClick={fetchFileList}>🔄 Fetch Files from Google Drive</button>
-    </>
-  )}
-</div>
-
-{token && (
-  <div className="box">
-    <h2>📂 Files:</h2>
-    <ul>
-  {fileList.map((file) => (
-    <li key={file.id}>
-      <div style={{ flex: 1 }}>
-      <span className="file-name" title={file.name}>{file.name}</span>
-        <br />
-        <small>
-          {file.size
-            ? `${(file.size / 1024).toFixed(2)} KB`
-            : "Size: Unknown"}{" "}
-          | {file.createdTime
-            ? new Date(file.createdTime).toLocaleString()
-            : "No date"}
-        </small>
+    <div className="container">
+      <div className="box auth-box">
+        <div className="card-header">
+          <span className="card-icon">🔒</span>
+          <h1>Encrypted Cloud Storage</h1>
+          <p className="tagline">Your files, secured and encrypted in the cloud.</p>
+          {isSignedIn && (
+            <button className="signout" onClick={handleSignOut}>
+              <FaSignOutAlt style={{ fontSize: '1.2em' }} /> Sign Out
+            </button>
+          )}
+        </div>
+        {!isSignedIn && (
+          <div className="auth-container">
+            <p className="auth-message">Sign in to access your encrypted files</p>
+            <div id="googleSignInDiv"></div>
+          </div>
+        )}
+        {isSignedIn && !token && (
+          <div className="auth-container">
+            <div className="status-row">
+              <span className="status-badge success">
+                <FaGoogleDrive style={{ marginRight: '0.5em' }} /> Signed In
+              </span>
+              <span className="auth-desc">Authorize Google Drive access to continue</span>
+            </div>
+            <div className="file-actions">
+              <button className="upload big-btn" onClick={handleRequestAccessToken}>
+                <FaGoogleDrive style={{ fontSize: '1.5em' }} /> Authorize Google Drive
+              </button>
+              <button className="signout big-btn" onClick={handleSignOut}>
+                <FaSignOutAlt style={{ fontSize: '1.5em' }} /> Sign Out
+              </button>
+            </div>
+          </div>
+        )}
+        {token && (
+          <div className="auth-container">
+            <p className="auth-message">
+              <span className="status-badge success">Connected</span>
+              You are signed in and authorized
+            </p>
+            <div 
+              className={`file-upload-area ${isDragging ? 'dragging' : ''}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <label className="file-upload-label">
+                <FaCloudUploadAlt style={{ fontSize: '2em' }} />
+                <span>Drag & Drop or Click to Upload</span>
+                <input type="file" onChange={handleFileUpload} />
+              </label>
+            </div>
+          </div>
+        )}
       </div>
-      <button className="download" onClick={() => handleDownloadAndDecrypt(file)}>
-        ⬇️ Download & Decrypt
-      </button>
-    </li>
-  ))}
-</ul>
 
-    <button className="signout" onClick={handleSignOut}>Sign Out</button>
-  </div>
-)}
+      {token && (
+        <div className="box">
+          <div className="file-header">
+            <h2>📂 Your Files</h2>
+          </div>
 
+          {isLoading && (
+            <div className="loading-container">
+              <FaSpinner className="spinner" />
+              <p>Processing...</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="error-message">
+              {error}
+            </div>
+          )}
+
+          {!isLoading && (!fileList || fileList.length === 0) && (
+            <div className="empty-state">
+              <p>No files found. Upload your first encrypted file!</p>
+            </div>
+          )}
+
+          <ul className="file-list">
+            {fileList && fileList.map((file) => (
+              <li key={file.id} className="file-item">
+                <div className="file-info">
+                  <span className="file-name" title={file.name}>
+                    {file.name}
+                  </span>
+                  <div className="file-meta">
+                    {file.size
+                      ? `${(file.size / 1024).toFixed(2)} KB`
+                      : "Size: Unknown"}{" "}
+                    | {file.createdTime
+                      ? new Date(file.createdTime).toLocaleString()
+                      : "No date"}
+                  </div>
+                </div>
+                <div className="file-actions">
+                  <button
+                    className="view"
+                    onClick={() => handleViewFile(file)}
+                  >
+                    <FaEye style={{ fontSize: '1.2em' }} /> View Details
+                  </button>
+                  <button
+                    className="download"
+                    onClick={() => handleDownloadAndDecrypt(file)}
+                  >
+                    <FaDownload style={{ fontSize: '1.2em' }} /> Download & Decrypt
+                  </button>
+                  <button
+                    className="delete"
+                    onClick={() => handleDeleteFile(file.id)}
+                  >
+                    <FaTrash style={{ fontSize: '1.2em' }} /> Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {viewingFile && (
+            <div className="modal-overlay" onClick={closeViewModal}>
+              <div className="modal-content" onClick={e => e.stopPropagation()}>
+                <h3>File Details</h3>
+                <div className="file-details">
+                  <p><strong>Name:</strong> {viewingFile.name}</p>
+                  <p><strong>Type:</strong> {viewingFile.type}</p>
+                  <p><strong>Size:</strong> {viewingFile.size}</p>
+                  <p><strong>Created:</strong> {viewingFile.createdTime}</p>
+                </div>
+                <button className="close-modal" onClick={closeViewModal}>Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
